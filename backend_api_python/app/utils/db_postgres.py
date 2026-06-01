@@ -15,6 +15,7 @@ import time
 import threading
 from typing import Optional, Any, List, Dict
 from contextlib import contextmanager
+from urllib.parse import parse_qsl, unquote, urlparse
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -63,44 +64,31 @@ def _get_database_url() -> str:
 
 def _parse_database_url(url: str) -> Dict[str, Any]:
     """
-    Parse DATABASE_URL format: postgresql://user:password@host:port/dbname
+    Parse DATABASE_URL format:
+    postgresql://user:password@host:port/dbname?sslmode=require
     """
     if not url:
         return {}
-    
-    # Remove protocol prefix
-    if url.startswith('postgresql://'):
-        url = url[13:]
-    elif url.startswith('postgres://'):
-        url = url[11:]
-    else:
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ('postgresql', 'postgres'):
         return {}
-    
-    result = {}
-    
-    # Split user:password@host:port/dbname
-    if '@' in url:
-        auth, hostpart = url.rsplit('@', 1)
-        if ':' in auth:
-            result['user'], result['password'] = auth.split(':', 1)
-        else:
-            result['user'] = auth
-    else:
-        hostpart = url
-    
-    # Split host:port/dbname
-    if '/' in hostpart:
-        hostport, result['dbname'] = hostpart.split('/', 1)
-    else:
-        hostport = hostpart
-    
-    if ':' in hostport:
-        result['host'], port_str = hostport.split(':', 1)
-        result['port'] = int(port_str)
-    else:
-        result['host'] = hostport
-        result['port'] = 5432
-    
+
+    result: Dict[str, Any] = {
+        'host': parsed.hostname or 'localhost',
+        'port': parsed.port or 5432,
+    }
+    if parsed.username:
+        result['user'] = unquote(parsed.username)
+    if parsed.password:
+        result['password'] = unquote(parsed.password)
+    if parsed.path and parsed.path != '/':
+        result['dbname'] = unquote(parsed.path.lstrip('/'))
+
+    for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+        if key in ('sslmode', 'sslcert', 'sslkey', 'sslrootcert', 'sslcrl', 'channel_binding'):
+            result[key] = value
+
     return result
 
 
@@ -127,25 +115,32 @@ def _get_connection_pool():
             raise RuntimeError(f"Invalid DATABASE_URL format: {db_url}")
         
         try:
-            _connection_pool = pool.ThreadedConnectionPool(
-                minconn=DB_POOL_MIN,
-                maxconn=DB_POOL_MAX,
-                host=params.get('host', 'localhost'),
-                port=params.get('port', 5432),
-                user=params.get('user', 'quantdinger'),
-                password=params.get('password', ''),
-                dbname=params.get('dbname', 'quantdinger'),
-                connect_timeout=10,
+            conn_kwargs = {
+                'host': params.get('host', 'localhost'),
+                'port': params.get('port', 5432),
+                'user': params.get('user', 'quantdinger'),
+                'password': params.get('password', ''),
+                'dbname': params.get('dbname', 'quantdinger'),
+                'connect_timeout': 10,
                 # Apply timezone at connection establishment so we don't need
                 # per-checkout SET TIME ZONE (which left connections in an
                 # "idle in transaction" state when no explicit commit/rollback
                 # followed).  keepalives keep dead sockets from lingering in
                 # the pool when the PG side or a NAT drops them.
-                options="-c timezone=UTC",
-                keepalives=1,
-                keepalives_idle=30,
-                keepalives_interval=10,
-                keepalives_count=3,
+                'options': "-c timezone=UTC",
+                'keepalives': 1,
+                'keepalives_idle': 30,
+                'keepalives_interval': 10,
+                'keepalives_count': 3,
+            }
+            for key in ('sslmode', 'sslcert', 'sslkey', 'sslrootcert', 'sslcrl', 'channel_binding'):
+                if params.get(key):
+                    conn_kwargs[key] = params[key]
+
+            _connection_pool = pool.ThreadedConnectionPool(
+                minconn=DB_POOL_MIN,
+                maxconn=DB_POOL_MAX,
+                **conn_kwargs,
             )
             logger.info(
                 f"PostgreSQL connection pool created: "
