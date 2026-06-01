@@ -3,15 +3,19 @@
 # Usage:
 # 1. Render Dashboard -> New -> Blueprint -> select this fork.
 # 2. During creation, set ADMIN_PASSWORD to a strong password.
-# 3. After the first deploy, verify the generated service URLs. If Render gives
+# 3. Provide DATABASE_URL from an external PostgreSQL provider such as Neon or
+#    Supabase. This Blueprint intentionally does not create Render PostgreSQL,
+#    so it can avoid Render's payment-method requirement.
+# 4. After the first deploy, verify the generated service URLs. If Render gives
 #    different domains, update:
 #      - backend env FRONTEND_URL
 #      - frontend env BACKEND_URL
 #
 # Notes:
 # - QuantDinger is a multi-service app. Render does not run docker-compose as a
-#   single service, so this Blueprint splits it into backend, frontend, and
-#   PostgreSQL.
+#   single service, so this Blueprint deploys backend and frontend separately.
+# - PostgreSQL is required by QuantDinger, but this file expects an external
+#   DATABASE_URL instead of provisioning Render PostgreSQL.
 # - Redis is intentionally disabled here. QuantDinger falls back to in-memory
 #   cache when CACHE_ENABLED=false, which avoids a Render Key Value connection
 #   string mismatch without changing upstream code.
@@ -36,9 +40,7 @@ services:
       - key: DB_TYPE
         value: postgresql
       - key: DATABASE_URL
-        fromDatabase:
-          name: quantdinger-db
-          property: connectionString
+        sync: false
       - key: CACHE_ENABLED
         value: "false"
       - key: SECRET_KEY
@@ -74,11 +76,3 @@ services:
     envVars:
       - key: BACKEND_URL
         value: https://quantdinger-backend.onrender.com
-
-databases:
-  - name: quantdinger-db
-    plan: basic-256mb
-    databaseName: quantdinger
-    user: quantdinger
-    postgresMajorVersion: "16"
-    ipAllowList: []
