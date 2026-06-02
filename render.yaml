@@ -29,7 +29,7 @@ services:
     plan: free
     dockerContext: ./backend_api_python
     dockerfilePath: ./backend_api_python/Dockerfile
-    healthCheckPath: /api/health
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_API_HOST
         value: 0.0.0.0
@@ -68,11 +68,13 @@ services:
 
   - type: web
     name: quantdinger-frontend
-    runtime: image
+    runtime: docker
     plan: free
-    image:
-      url: ghcr.io/brokermr810/quantdinger-frontend:latest
+    dockerContext: ./render-frontend
+    dockerfilePath: ./render-frontend/Dockerfile
     healthCheckPath: /health
     envVars:
       - key: BACKEND_URL
         value: https://quantdinger-backend.onrender.com
+      - key: BACKEND_HOST
+        value: quantdinger-backend.onrender.com
