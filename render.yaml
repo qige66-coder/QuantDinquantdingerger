@@ -55,6 +55,8 @@ services:
         value: ""
       - key: ENABLE_REGISTRATION
         value: "true"
+      - key: SHOW_CN_STOCK
+        value: "true"
       - key: GUNICORN_WORKERS
         value: "1"
       - key: GUNICORN_THREADS
